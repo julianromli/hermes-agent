@@ -141,6 +141,8 @@ DEFAULT_CONTEXT_LENGTHS = {
     # fuzzy-match collisions (e.g. "anthropic/claude-sonnet-4" is a
     # substring of "anthropic/claude-sonnet-4.6").
     # OpenRouter-prefixed models resolve via OpenRouter live API or models.dev.
+    "claude-opus-4-8": 1000000,
+    "claude-opus-4.8": 1000000,
     "claude-opus-4-7": 1000000,
     "claude-opus-4.7": 1000000,
     "claude-opus-4-6": 1000000,
@@ -219,6 +221,20 @@ DEFAULT_CONTEXT_LENGTHS = {
     "grok-3": 131072,           # grok-3, grok-3-mini, grok-3-fast, grok-3-mini-fast
     "grok-2": 131072,           # grok-2, grok-2-1212, grok-2-latest
     "grok": 131072,             # catch-all (grok-beta, unknown grok-*)
+    # Cursor (Anysphere) — models accessed via the cursor-agent CLI.
+    # These ARE the cursor-side context limits, not the underlying model's
+    # true window. Cursor's harness system prompt eats ~25-35K tokens of
+    # every turn (cached after the first call), so the *usable* window
+    # for chat history is the listed value minus that fixed overhead.
+    # Sources:
+    #   - https://cursor.com/docs/models (composer family pinned to 200K)
+    #   - https://cursor.com/blog/composer-2-5  (Composer 2.5 announcement)
+    #   - cursor-agent --list-models (model IDs)
+    "composer-2.5-fast": 200000,   # 200K per cursor docs (base model is 256K)
+    "composer-2.5": 200000,
+    "composer-2-fast": 200000,
+    "composer-2": 200000,
+    "composer": 200000,            # generic fallback
     # Kimi
     "kimi": 262144,
     # Tencent — Hy3 Preview (Hunyuan) with 256K context window.
@@ -911,12 +927,33 @@ def parse_context_limit_from_error(error_msg: str) -> Optional[int]:
     return None
 
 
+def get_context_length_from_provider_error(
+    error_msg: str,
+    current_context_length: int,
+) -> Optional[int]:
+    """Return a provider-reported lower context limit, if one is present.
+
+    Context-overflow recovery must not invent a new model window size.  Some
+    providers only say that the input exceeds the context window without
+    reporting the actual maximum.  In that case callers should keep the
+    configured context length and try compression only, rather than stepping
+    down through guessed probe tiers (1M → 256K → 128K → ...).
+    """
+    parsed_limit = parse_context_limit_from_error(error_msg)
+    if parsed_limit is None:
+        return None
+    if parsed_limit < current_context_length:
+        return parsed_limit
+    return None
+
+
 def parse_available_output_tokens_from_error(error_msg: str) -> Optional[int]:
     """Detect an "output cap too large" error and return how many output tokens are available.
 
     Background — two distinct context errors exist:
       1. "Prompt too long"  — the INPUT itself exceeds the context window.
-           Fix: compress history and/or halve context_length.
+           Fix: compress history, and only reduce context_length if the
+           provider explicitly reports the actual lower limit.
       2. "max_tokens too large" — input is fine, but input + requested_output > window.
            Fix: reduce max_tokens (the output cap) for this call.
            Do NOT touch context_length — the window hasn't shrunk.

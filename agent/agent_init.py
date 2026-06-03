@@ -711,7 +711,12 @@ def init_agent(
                 client_kwargs = {"api_key": api_key, "base_url": base_url}
             if _provider_timeout is not None:
                 client_kwargs["timeout"] = _provider_timeout
-            if agent.provider == "copilot-acp":
+            # External-process providers (copilot-acp, cursor) need the
+            # resolved CLI binary + extra-args forwarded to their client.
+            # Without this, chat uses whatever ``cursor-agent`` is on PATH
+            # while ``hermes doctor`` / status report a different
+            # resolved binary — silently inconsistent.
+            if agent.provider in ("copilot-acp", "cursor"):
                 client_kwargs["command"] = agent.acp_command
                 client_kwargs["args"] = agent.acp_args
             effective_base = base_url
@@ -1522,6 +1527,7 @@ def init_agent(
                 platform=agent.platform or "cli",
                 model=agent.model,
                 context_length=getattr(agent.context_compressor, "context_length", 0),
+                conversation_id=getattr(agent, "_gateway_session_key", None),
             )
         except Exception as _ce_err:
             _ra().logger.debug("Context engine on_session_start: %s", _ce_err)

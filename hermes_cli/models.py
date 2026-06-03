@@ -193,6 +193,38 @@ _PROVIDER_MODELS: dict[str, list[str]] = {
     "copilot-acp": [
         "copilot-acp",
     ],
+    # Curated subset of `cursor-agent --list-models` (Ultra account, May 2026).
+    # Live catalog is fetched dynamically; this fallback is shown when the CLI
+    # is unavailable or the user has no `cursor-agent` login yet. Order
+    # roughly: server-pick, Cursor's house Composer models, then frontier
+    # families (GPT-5.x, Claude Opus/Sonnet 4.x, Gemini 3.x, Grok, Kimi).
+    "cursor": [
+        "auto",
+        "composer-2.5-fast",
+        "composer-2.5",
+        "composer-2-fast",
+        "composer-2",
+        "gpt-5.5",
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-5.3",
+        "claude-opus-4.5",
+        "claude-opus-4",
+        "claude-sonnet-4.5",
+        "claude-sonnet-4",
+        "claude-sonnet-4.6",
+        "claude-haiku-4.5",
+        "gemini-3.5-pro",
+        "gemini-3.1-pro-preview",
+        "gemini-3.5-flash-preview",
+        "grok-4",
+        "grok-3.5",
+        "kimi-k2.6",
+        "o3-pro",
+        "o4-mini",
+        "deepseek-r2",
+        "deepseek-v4",
+    ],
     "copilot": [
         "gpt-5.4",
         "gpt-5.4-mini",
@@ -922,6 +954,7 @@ CANONICAL_PROVIDERS: list[ProviderEntry] = [
     ProviderEntry("nvidia",         "NVIDIA NIM",               "NVIDIA NIM (Nemotron models — build.nvidia.com or local NIM)"),
     ProviderEntry("copilot",        "GitHub Copilot",           "GitHub Copilot (uses GITHUB_TOKEN or gh auth token)"),
     ProviderEntry("copilot-acp",    "GitHub Copilot ACP",       "GitHub Copilot ACP (spawns `copilot --acp --stdio`)"),
+    ProviderEntry("cursor",         "Cursor",                   "Cursor (100+ models, subscription)"),
     ProviderEntry("huggingface",    "Hugging Face",             "Hugging Face Inference Providers (20+ open models)"),
     ProviderEntry("gemini",         "Google AI Studio",         "Google AI Studio (Gemini models — native Gemini API)"),
     ProviderEntry("google-gemini-cli", "Google Gemini (OAuth)",   "Google Gemini via OAuth + Code Assist (free tier supported; no API key needed)"),
@@ -980,6 +1013,11 @@ _PROVIDER_ALIASES = {
     "github-model": "copilot",
     "github-copilot-acp": "copilot-acp",
     "copilot-acp-agent": "copilot-acp",
+    "cursor-agent": "cursor",
+    "cursor-cli": "cursor",
+    "cursor-sub": "cursor",
+    "cursor-subscription": "cursor",
+    "anysphere": "cursor",
     "google": "gemini",
     "google-gemini": "gemini",
     "google-ai-studio": "gemini",
@@ -2034,6 +2072,33 @@ def provider_model_ids(provider: Optional[str], *, force_refresh: bool = False) 
             pass
         if normalized == "copilot-acp":
             return list(_PROVIDER_MODELS.get("copilot", []))
+    if normalized == "cursor":
+        # Live catalog: shell out to `cursor-agent --list-models`. Falls back
+        # to the curated snapshot when the CLI is missing or returns nothing.
+        try:
+            import shutil as _shutil
+            import subprocess as _subprocess
+
+            cmd = _shutil.which("cursor-agent")
+            if cmd:
+                out = _subprocess.check_output(
+                    [cmd, "--list-models"],
+                    text=True,
+                    timeout=8.0,
+                )
+                ids = []
+                for raw in out.splitlines():
+                    line = raw.strip()
+                    if not line or " - " not in line:
+                        continue
+                    model_id = line.split(" - ", 1)[0].strip()
+                    model_id = model_id.split()[0]  # strip "(current)" / "(default)"
+                    if model_id:
+                        ids.append(model_id)
+                if ids:
+                    return ids
+        except Exception:
+            pass
     if normalized == "nous":
         # Try live Nous Portal /models endpoint
         try:
